@@ -19,6 +19,8 @@ export type OperationError = {
 };
 
 export type NetworkStatus = {
+  pendingQueries: Record<string, number>;
+  pendingMutations: Record<string, number>;
   numPendingQueries: number;
   numPendingMutations: number;
   queryError?: OperationError;
@@ -34,6 +36,38 @@ function isOperationType(operation: Operation, type: OperationTypeNode) {
 
 function pendingOperations(type: OperationTypeNode) {
   return function pendingOperationsByType(
+    state: Record<string, number>,
+    action: NetworkStatusAction
+  ) {
+    if (!isOperationType(action.payload.operation, type)) {
+      return state;
+    }
+
+    const {operationName} = action.payload.operation;
+    const {[operationName]: value = 0} = state;
+
+    switch (action.type) {
+      case ActionTypes.REQUEST:
+        return {
+          ...state,
+          [operationName]: value + 1
+        };
+
+      case ActionTypes.ERROR:
+      case ActionTypes.SUCCESS:
+      case ActionTypes.CANCEL:
+        return {
+          ...state,
+          [operationName]: Math.max(value - 1, 0)
+        };
+    }
+
+    return state;
+  };
+}
+
+function numPendingOperations(type: OperationTypeNode) {
+  return function numPendingOperationsByType(
     state: number = 0,
     action: NetworkStatusAction
   ) {
@@ -93,10 +127,13 @@ function latestOperationError(type: OperationTypeNode) {
 const pendingQueries = pendingOperations('query');
 const pendingMutations = pendingOperations('mutation');
 
+const numPendingQueries = numPendingOperations('query');
+const numPendingMutations = numPendingOperations('mutation');
+
 const queryError = latestOperationError('query');
 const mutationError = latestOperationError('mutation');
 
-function reducer(
+export function reducer(
   state: NetworkStatus,
   action: NetworkStatusAction
 ): NetworkStatus {
@@ -107,11 +144,19 @@ function reducer(
   const updatedState = {...state};
 
   // Pending operations
-  updatedState.numPendingQueries = pendingQueries(
+  updatedState.pendingQueries = pendingQueries(
+    updatedState.pendingQueries,
+    action
+  );
+  updatedState.pendingMutations = pendingMutations(
+    updatedState.pendingMutations,
+    action
+  );
+  updatedState.numPendingQueries = numPendingQueries(
     updatedState.numPendingQueries,
     action
   );
-  updatedState.numPendingMutations = pendingMutations(
+  updatedState.numPendingMutations = numPendingMutations(
     updatedState.numPendingMutations,
     action
   );
@@ -130,9 +175,11 @@ function reducer(
   return haveValuesChanged ? updatedState : state;
 }
 
-const initialState: NetworkStatus = {
+export const initialState: NetworkStatus = {
   numPendingQueries: 0,
   numPendingMutations: 0,
+  pendingQueries: {},
+  pendingMutations: {},
   queryError: undefined,
   mutationError: undefined
 };
